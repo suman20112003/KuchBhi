@@ -75,17 +75,39 @@ if (typeof dns.setDefaultResultOrder === 'function') {
     }
 }
 
+const mailTransporter = (SMTP_HOST && SMTP_USER && SMTP_PASS)
+    ? nodemailer.createTransport({
+        host: SMTP_HOST,
+        port: SMTP_PORT,
+        family: SMTP_IP_FAMILY,
+        secure: SMTP_SECURE,
+        requireTLS: SMTP_REQUIRE_TLS,
+        connectionTimeout: SMTP_CONNECTION_TIMEOUT,
+        greetingTimeout: SMTP_GREETING_TIMEOUT,
+        socketTimeout: SMTP_SOCKET_TIMEOUT,
+        auth: {
+            user: SMTP_USER,
+            pass: SMTP_PASS
+        }
+    })
+    : null;
 
-const mailTransporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-    },
-    tls: {
-        rejectUnauthorized: false
-    }
-});
+if (mailTransporter && SMTP_VERIFY_ON_START) {
+    mailTransporter.verify()
+        .then(() => {
+            console.log(`SMTP ready: ${SMTP_HOST}:${SMTP_PORT} as ${SMTP_USER}`);
+        })
+        .catch((err) => {
+            console.error('SMTP verification failed:', err.message || err);
+        });
+} else if (mailTransporter) {
+    console.log('SMTP transporter created. Startup verification is disabled (SMTP_VERIFY_ON_START=false).');
+} else {
+    const missingVars = [];
+    if (!SMTP_USER) missingVars.push('SMTP_USER');
+    if (!SMTP_PASS) missingVars.push('SMTP_PASS or SMTP_APP_PASSWORD');
+    console.warn(`SMTP is not configured. Email notifications are disabled. Missing: ${missingVars.join(', ') || 'unknown'}`);
+}
 
 async function sendMailSafe(mailOptions) {
     if (!mailTransporter) {
