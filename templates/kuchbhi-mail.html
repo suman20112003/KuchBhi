@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{TITLE}}</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,sans-serif;">
+  <div style="max-width:600px;margin:20px auto;background:#ffffff;border-radius:8px;overflow:hidden;">
+    <div style="background:#000000;padding:25px;text-align:center;">
+      <img src="{{LOGO_URL}}" alt="KuchBhi Logo" style="max-width:180px;" />
+    </div>
+
+    <div style="padding:30px;color:#333333;line-height:1.6;">
+      <h2 style="margin-top:0;color:#d9534f;">{{TITLE}}</h2>
+      <p>{{GREETING}}</p>
+      <p>{{MESSAGE}}</p>
+
+      <div style="margin:20px 0;padding:18px 20px;border:1px solid #d9d9d9;border-radius:6px;background:#fafafa;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+          {{DETAIL_ROWS}}
+        </table>
+      </div>
+
+      {{ACTION_BLOCK}}
+
+      <p style="margin-top:16px;">{{FOOTER}}</p>
+    </div>
+
+    <div style="background:#000000;color:#ffffff;padding:25px;text-align:center;font-size:14px;">
+      <div style="margin-bottom:15px;">
+        <img src="{{LOGO_URL}}" alt="KuchBhi Logo" style="max-width:140px;" />
+      </div>
+      <p style="margin:5px 0;">Support Contact</p>
+      <p style="margin:5px 0;font-weight:bold;">Support Name: {{SUPPORT_NAME}}</p>
+      <p style="margin:5px 0;">
+        Support Email:
+        <a href="mailto:{{SUPPORT_EMAIL}}" style="color:#ffffff;text-decoration:none;">{{SUPPORT_EMAIL}}</a>
+      </p>
+      <p style="margin:5px 0;">Support Phone: {{SUPPORT_PHONE}}</p>
+    </div>
+  </div>
+</body>
+</html>
