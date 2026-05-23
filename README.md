@@ -1,4 +1,5 @@
-# Smart Restaurant System
+# KuchBhi
+KuchBhi Restaurant is a modern and innovative online restaurant platform developed to provide customers with a complete digital dining experience, including online food ordering and table booking.
 
 A full-stack restaurant web application built with Node.js, Express, MongoDB, and EJS, with static frontend pages for menu, booking, cart, testimonials, and more.
 
