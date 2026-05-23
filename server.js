@@ -56,10 +56,18 @@ const MAIL_TEMPLATE_PATH = path.join(__dirname, 'templates', 'kuchbhi-mail.html'
 const MAIL_LOGO_PATH = process.env.MAIL_LOGO_PATH || path.join(__dirname, 'img', 'hero.png');
 const MAIL_LOGO_CID = 'kuchbhi-logo@kuchbhi';
 const MAIL_LOGO_EXISTS = fs.existsSync(MAIL_LOGO_PATH);
-const MAIL_LOGO_SRC = MAIL_LOGO_EXISTS ? `cid:${MAIL_LOGO_CID}` : MAIL_HEADER_LOGO_URL;
+// Compute Brevo usage flag early so MAIL_LOGO_SRC can use the right URL
+const USE_BREVO = BREVO_API_KEY.startsWith('xkeysib-');
+// Brevo API does not support CID inline attachments — always use external URL for that path
+const MAIL_LOGO_SRC = (MAIL_LOGO_EXISTS && !USE_BREVO) ? `cid:${MAIL_LOGO_CID}` : MAIL_HEADER_LOGO_URL;
 const MAIL_LOGO_ATTACHMENTS = MAIL_LOGO_EXISTS
     ? [{ filename: path.basename(MAIL_LOGO_PATH), path: MAIL_LOGO_PATH, cid: MAIL_LOGO_CID }]
     : [];
+// Pre-read logo as base64 for Brevo inline attachment (only if file exists)
+const MAIL_LOGO_BASE64 = (USE_BREVO && MAIL_LOGO_EXISTS)
+    ? fs.readFileSync(MAIL_LOGO_PATH).toString('base64')
+    : null;
+const MAIL_LOGO_MIME = (MAIL_LOGO_PATH.endsWith('.png') ? 'image/png' : 'image/jpeg');
 
 function buildAppUrl(routePath = '/') {
     const safePath = routePath.startsWith('/') ? routePath : `/${routePath}`;
@@ -114,7 +122,6 @@ if (mailTransporter && SMTP_VERIFY_ON_START) {
 // --- Brevo (Sendinblue) transactional email ---
 const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || 'sumanpingla20@gmail.com';
 const BREVO_SENDER_NAME  = process.env.BREVO_SENDER_NAME  || 'KuchBhi Restaurant';
-const USE_BREVO = BREVO_API_KEY.startsWith('xkeysib-');
 const brevoClient = USE_BREVO
     ? new brevo.BrevoClient({ apiKey: BREVO_API_KEY })
     : null;
@@ -130,12 +137,20 @@ async function sendMailSafe(mailOptions) {
             const toAddr = Array.isArray(mailOptions.to)
                 ? mailOptions.to.map(t => (typeof t === 'string' ? { email: t } : t))
                 : [{ email: mailOptions.to }];
-            const result = await brevoClient.transactionalEmails.sendTransacEmail({
+            const brevoPayload = {
                 subject:     mailOptions.subject,
                 htmlContent: mailOptions.html || mailOptions.htmlContent || '',
                 sender:      { name: BREVO_SENDER_NAME, email: BREVO_SENDER_EMAIL },
                 to:          toAddr
-            });
+            };
+            // Attach logo inline so it renders in the email template
+            if (MAIL_LOGO_BASE64) {
+                brevoPayload.attachment = [{
+                    name:    path.basename(MAIL_LOGO_PATH),
+                    content: MAIL_LOGO_BASE64
+                }];
+            }
+            const result = await brevoClient.transactionalEmails.sendTransacEmail(brevoPayload);
             console.log(`[Brevo] Email sent to ${mailOptions.to}:`, result?.body?.messageId || result);
             return true;
         } catch (err) {
