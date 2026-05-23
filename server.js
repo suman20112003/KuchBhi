@@ -16,14 +16,14 @@ const { name } = require('ejs');
 const { ObjectId } = require('mongodb');
 const { MongoClient } = mongodb;
 let dbinstance;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://soumyajit:2211981415@cluster0.zsuxvan.mongodb.net/Soumyajit?retryWrites=true&w=majority&appName=Cluster0';
-const DB_NAME = process.env.MONGODB_DB || 'Soumyajit';
+const MONGODB_URI = process.env.MONGODB_URI ;
+const DB_NAME = process.env.MONGODB_DB ;
 let client = null;
 let connectionPromise = null;
 let localMongoStartupPromise = null;
 
-const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || 'rzp_test_SreSo94VnXV4MO';
-const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '4Yr7BaXookyhPf1NExXrFbln';
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID ;
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET ;
 const razorpay = (RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET)
     ? new Razorpay({ key_id: RAZORPAY_KEY_ID, key_secret: RAZORPAY_KEY_SECRET })
     : null;
@@ -32,7 +32,7 @@ const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_SECURE = String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true';
 const SMTP_USER = process.env.SMTP_USER || 'sumanpingla20@gmail.com';
-const SMTP_PASS = process.env.SMTP_PASS || 'csev iywa sqgl bceo';
+const SMTP_PASS = process.env.SMTP_PASS ;
 const MAIL_FROM = process.env.MAIL_FROM || 'support@kuchbhi.com';
 const ADMIN_NOTIFICATION_EMAIL = process.env.ADMIN_NOTIFICATION_EMAIL || 'sumanpingla20@gmail.com';
 const EFFECTIVE_MAIL_FROM = SMTP_USER ? `KuchBhi Support <${SMTP_USER}>` : (MAIL_FROM || 'no-reply@kuchbhi.com');
