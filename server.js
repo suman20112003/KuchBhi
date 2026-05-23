@@ -4,6 +4,7 @@ const app = express();
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const dns = require('dns');
 const { spawn } = require('child_process');
 const session = require("express-session");
 const cookie = require('cookie-parser');
@@ -34,6 +35,14 @@ const SMTP_SECURE = String(process.env.SMTP_SECURE || 'false').toLowerCase() ===
 const SMTP_USER = process.env.SMTP_USER || 'sumanpingla20@gmail.com';
 const SMTP_PASS_RAW = String(process.env.SMTP_PASS || process.env.SMTP_APP_PASSWORD || '').trim();
 const SMTP_PASS = SMTP_HOST.includes('gmail.com') ? SMTP_PASS_RAW.replace(/\s+/g, '') : SMTP_PASS_RAW;
+const SMTP_REQUIRE_TLS = String(process.env.SMTP_REQUIRE_TLS || (!SMTP_SECURE)).toLowerCase() === 'true';
+const SMTP_CONNECTION_TIMEOUT = Number(process.env.SMTP_CONNECTION_TIMEOUT || 10000);
+const SMTP_GREETING_TIMEOUT = Number(process.env.SMTP_GREETING_TIMEOUT || 10000);
+const SMTP_SOCKET_TIMEOUT = Number(process.env.SMTP_SOCKET_TIMEOUT || 20000);
+const SMTP_VERIFY_ON_START = String(process.env.SMTP_VERIFY_ON_START || 'false').toLowerCase() === 'true';
+const SMTP_IP_FAMILY = Number(process.env.SMTP_IP_FAMILY || 4);
+const DNS_RESULT_ORDER = process.env.DNS_RESULT_ORDER || 'ipv4first';
+const MAIL_SEND_TIMEOUT_MS = Number(process.env.MAIL_SEND_TIMEOUT_MS || 12000);
 const MAIL_FROM = process.env.MAIL_FROM || 'support@kuchbhi.com';
 const ADMIN_NOTIFICATION_EMAIL = process.env.ADMIN_NOTIFICATION_EMAIL || 'sumanpingla20@gmail.com';
 const EFFECTIVE_MAIL_FROM = SMTP_USER ? `KuchBhi Support <${SMTP_USER}>` : (MAIL_FROM || 'no-reply@kuchbhi.com');
@@ -58,12 +67,25 @@ function buildAppUrl(routePath = '/') {
 
 console.log(`Effective mail sender: ${EFFECTIVE_MAIL_FROM}`);
 
+if (typeof dns.setDefaultResultOrder === 'function') {
+    try {
+        dns.setDefaultResultOrder(DNS_RESULT_ORDER);
+        console.log(`DNS result order set to ${DNS_RESULT_ORDER}`);
+    } catch (err) {
+        console.warn(`Unable to set DNS result order (${DNS_RESULT_ORDER}):`, err.message || err);
+    }
+}
+
 const mailTransporter = (SMTP_HOST && SMTP_USER && SMTP_PASS)
     ? nodemailer.createTransport({
         host: SMTP_HOST,
         port: SMTP_PORT,
+        family: SMTP_IP_FAMILY,
         secure: SMTP_SECURE,
-        requireTLS: !SMTP_SECURE,
+        requireTLS: SMTP_REQUIRE_TLS,
+        connectionTimeout: SMTP_CONNECTION_TIMEOUT,
+        greetingTimeout: SMTP_GREETING_TIMEOUT,
+        socketTimeout: SMTP_SOCKET_TIMEOUT,
         auth: {
             user: SMTP_USER,
             pass: SMTP_PASS
@@ -71,7 +93,7 @@ const mailTransporter = (SMTP_HOST && SMTP_USER && SMTP_PASS)
     })
     : null;
 
-if (mailTransporter) {
+if (mailTransporter && SMTP_VERIFY_ON_START) {
     mailTransporter.verify()
         .then(() => {
             console.log(`SMTP ready: ${SMTP_HOST}:${SMTP_PORT} as ${SMTP_USER}`);
@@ -79,6 +101,8 @@ if (mailTransporter) {
         .catch((err) => {
             console.error('SMTP verification failed:', err.message || err);
         });
+} else if (mailTransporter) {
+    console.log('SMTP transporter created. Startup verification is disabled (SMTP_VERIFY_ON_START=false).');
 } else {
     const missingVars = [];
     if (!SMTP_USER) missingVars.push('SMTP_USER');
@@ -93,16 +117,36 @@ async function sendMailSafe(mailOptions) {
     }
 
     try {
-        const info = await mailTransporter.sendMail({
+        const sendPromise = mailTransporter.sendMail({
             ...mailOptions,
             attachments: [...(mailOptions.attachments || []), ...MAIL_LOGO_ATTACHMENTS]
         });
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error(`Mail send timeout after ${MAIL_SEND_TIMEOUT_MS}ms`)), MAIL_SEND_TIMEOUT_MS);
+        });
+        const info = await Promise.race([sendPromise, timeoutPromise]);
         console.log(`Email sent to ${mailOptions.to}. MessageId: ${info.messageId}`);
         return true;
     } catch (err) {
         console.error(`Email send failed for ${mailOptions.to}:`, err.message || err);
         return false;
     }
+}
+
+function runMailJobsInBackground(mailJobs, tag) {
+    if (!mailJobs.length) {
+        console.warn(`${tag} mail skipped: no recipient email available.`);
+        return;
+    }
+
+    Promise.allSettled(mailJobs)
+        .then((results) => {
+            const okCount = results.filter((result) => result.status === 'fulfilled' && result.value === true).length;
+            console.log(`${tag} mail status: ${okCount}/${mailJobs.length} sends successful.`);
+        })
+        .catch((err) => {
+            console.error(`${tag} mail background processing failed:`, err.message || err);
+        });
 }
 
 function escapeHtml(value) {
@@ -478,15 +522,8 @@ app.post('/booking', ensureDbConnected, async (req, res) => {
             }));
         }
 
-        if (mailJobs.length) {
-            const results = await Promise.allSettled(mailJobs);
-            const okCount = results.filter((result) => result.status === 'fulfilled' && result.value === true).length;
-            console.log(`Booking mail status: ${okCount}/${mailJobs.length} sends successful.`);
-        } else {
-            console.warn('Booking mail skipped: no recipient email available.');
-        }
-
         res.redirect('/home');
+        runMailJobsInBackground(mailJobs, 'Booking');
     }).catch((err) => {
         console.log(err);
     })
@@ -635,13 +672,8 @@ app.post('/payment/verify', check2, async (req, res) => {
         }));
     }
 
-    if (mailJobs.length) {
-        const results = await Promise.allSettled(mailJobs);
-        const okCount = results.filter((result) => result.status === 'fulfilled' && result.value === true).length;
-        console.log(`Checkout mail status: ${okCount}/${mailJobs.length} sends successful.`);
-    }
-
     res.json({ success: true, message: 'Payment verified successfully.' });
+    runMailJobsInBackground(mailJobs, 'Checkout');
 });
 
 // admin delete
