@@ -13,6 +13,7 @@ const multer = require('multer')
 const Razorpay = require('razorpay');
 const mongodb = require('mongodb');
 const nodemailer = require('nodemailer');
+const brevo = require('@getbrevo/brevo');
 const { name } = require('ejs');
 const { ObjectId } = require('mongodb');
 const { MongoClient } = mongodb;
@@ -109,21 +110,49 @@ if (mailTransporter && SMTP_VERIFY_ON_START) {
     console.warn(`SMTP is not configured. Email notifications are disabled. Missing: ${missingVars.join(', ') || 'unknown'}`);
 }
 
+// --- Brevo (Sendinblue) transactional email ---
+const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || 'sumanpingla20@gmail.com';
+const BREVO_SENDER_NAME  = process.env.BREVO_SENDER_NAME  || 'KuchBhi Restaurant';
+const USE_BREVO = Boolean(process.env.BREVO_API_KEY);
+const brevoClient = USE_BREVO
+    ? new brevo.BrevoClient({ apiKey: process.env.BREVO_API_KEY })
+    : null;
+
 async function sendMailSafe(mailOptions) {
-    if (!mailTransporter) {
-        console.warn('Email skipped: SMTP transporter is not configured.');
-        return false;
+    // --- Brevo path ---
+    if (USE_BREVO && brevoClient) {
+        try {
+            const toAddr = Array.isArray(mailOptions.to)
+                ? mailOptions.to.map(t => (typeof t === 'string' ? { email: t } : t))
+                : [{ email: mailOptions.to }];
+            const result = await brevoClient.transactionalEmails.sendTransacEmail({
+                subject:     mailOptions.subject,
+                htmlContent: mailOptions.html || mailOptions.htmlContent || '',
+                sender:      { name: BREVO_SENDER_NAME, email: BREVO_SENDER_EMAIL },
+                to:          toAddr
+            });
+            console.log(`[Brevo] Email sent to ${mailOptions.to}:`, result?.body?.messageId || result);
+            return true;
+        } catch (err) {
+            console.error('[Brevo] Email send failed:', err?.response?.body || err.message || err);
+            return false;
+        }
     }
 
+    // --- Nodemailer fallback ---
+    if (!mailTransporter) {
+        console.warn('Email skipped: neither Brevo nor SMTP transporter is configured.');
+        return false;
+    }
     try {
         const info = await mailTransporter.sendMail({
             ...mailOptions,
             attachments: [...(mailOptions.attachments || []), ...MAIL_LOGO_ATTACHMENTS]
         });
-        console.log(`Email sent to ${mailOptions.to}. MessageId: ${info.messageId}`);
+        console.log(`[SMTP] Email sent to ${mailOptions.to}. MessageId: ${info.messageId}`);
         return true;
     } catch (err) {
-        console.error(`Email send failed for ${mailOptions.to}:`, err.message || err);
+        console.error(`[SMTP] Email send failed for ${mailOptions.to}:`, err.message || err);
         return false;
     }
 }
