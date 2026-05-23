@@ -29,7 +29,7 @@ const razorpay = (RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET)
     ? new Razorpay({ key_id: RAZORPAY_KEY_ID, key_secret: RAZORPAY_KEY_SECRET })
     : null;
 
-const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
+const SMTP_HOST = process.env.SMTP_HOST ||'';
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_SECURE = String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true';
 const SMTP_USER = process.env.SMTP_USER || 'sumanpingla20@gmail.com';
@@ -349,6 +349,23 @@ app.get('/home', (req, res) => {
 app.get('/menu', (req, res) => {
     res.sendFile(__dirname + "/menu.html")
 })
+app.get("/test-mail", async (req, res) => {
+    try {
+        const info = await mailTransporter.sendMail({
+            from: process.env.SMTP_USER,
+            to: "sumanpingla20@gmail.com",
+            subject: "Test Email",
+            text: "Brevo SMTP working successfully"
+        });
+
+        console.log(info);
+
+        res.send("Mail Sent Successfully");
+    } catch (err) {
+        console.error(err);
+        res.send(err.message);
+    }
+});
 
 app.get('/contact', check, (req, res) => {
     res.redirect('/login');
