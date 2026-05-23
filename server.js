@@ -42,7 +42,6 @@ const SMTP_SOCKET_TIMEOUT = Number(process.env.SMTP_SOCKET_TIMEOUT || 20000);
 const SMTP_VERIFY_ON_START = String(process.env.SMTP_VERIFY_ON_START || 'false').toLowerCase() === 'true';
 const SMTP_IP_FAMILY = Number(process.env.SMTP_IP_FAMILY || 4);
 const DNS_RESULT_ORDER = process.env.DNS_RESULT_ORDER || 'ipv4first';
-const MAIL_SEND_TIMEOUT_MS = Number(process.env.MAIL_SEND_TIMEOUT_MS || 12000);
 const MAIL_FROM = process.env.MAIL_FROM || 'support@kuchbhi.com';
 const ADMIN_NOTIFICATION_EMAIL = process.env.ADMIN_NOTIFICATION_EMAIL || 'sumanpingla20@gmail.com';
 const EFFECTIVE_MAIL_FROM = SMTP_USER ? `KuchBhi Support <${SMTP_USER}>` : (MAIL_FROM || 'no-reply@kuchbhi.com');
@@ -76,39 +75,17 @@ if (typeof dns.setDefaultResultOrder === 'function') {
     }
 }
 
-const mailTransporter = (SMTP_HOST && SMTP_USER && SMTP_PASS)
-    ? nodemailer.createTransport({
-        host: SMTP_HOST,
-        port: SMTP_PORT,
-        family: SMTP_IP_FAMILY,
-        secure: SMTP_SECURE,
-        requireTLS: SMTP_REQUIRE_TLS,
-        connectionTimeout: SMTP_CONNECTION_TIMEOUT,
-        greetingTimeout: SMTP_GREETING_TIMEOUT,
-        socketTimeout: SMTP_SOCKET_TIMEOUT,
-        auth: {
-            user: SMTP_USER,
-            pass: SMTP_PASS
-        }
-    })
-    : null;
 
-if (mailTransporter && SMTP_VERIFY_ON_START) {
-    mailTransporter.verify()
-        .then(() => {
-            console.log(`SMTP ready: ${SMTP_HOST}:${SMTP_PORT} as ${SMTP_USER}`);
-        })
-        .catch((err) => {
-            console.error('SMTP verification failed:', err.message || err);
-        });
-} else if (mailTransporter) {
-    console.log('SMTP transporter created. Startup verification is disabled (SMTP_VERIFY_ON_START=false).');
-} else {
-    const missingVars = [];
-    if (!SMTP_USER) missingVars.push('SMTP_USER');
-    if (!SMTP_PASS) missingVars.push('SMTP_PASS or SMTP_APP_PASSWORD');
-    console.warn(`SMTP is not configured. Email notifications are disabled. Missing: ${missingVars.join(', ') || 'unknown'}`);
-}
+const mailTransporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+    },
+    tls: {
+        rejectUnauthorized: false
+    }
+});
 
 async function sendMailSafe(mailOptions) {
     if (!mailTransporter) {
@@ -117,36 +94,16 @@ async function sendMailSafe(mailOptions) {
     }
 
     try {
-        const sendPromise = mailTransporter.sendMail({
+        const info = await mailTransporter.sendMail({
             ...mailOptions,
             attachments: [...(mailOptions.attachments || []), ...MAIL_LOGO_ATTACHMENTS]
         });
-        const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error(`Mail send timeout after ${MAIL_SEND_TIMEOUT_MS}ms`)), MAIL_SEND_TIMEOUT_MS);
-        });
-        const info = await Promise.race([sendPromise, timeoutPromise]);
         console.log(`Email sent to ${mailOptions.to}. MessageId: ${info.messageId}`);
         return true;
     } catch (err) {
         console.error(`Email send failed for ${mailOptions.to}:`, err.message || err);
         return false;
     }
-}
-
-function runMailJobsInBackground(mailJobs, tag) {
-    if (!mailJobs.length) {
-        console.warn(`${tag} mail skipped: no recipient email available.`);
-        return;
-    }
-
-    Promise.allSettled(mailJobs)
-        .then((results) => {
-            const okCount = results.filter((result) => result.status === 'fulfilled' && result.value === true).length;
-            console.log(`${tag} mail status: ${okCount}/${mailJobs.length} sends successful.`);
-        })
-        .catch((err) => {
-            console.error(`${tag} mail background processing failed:`, err.message || err);
-        });
 }
 
 function escapeHtml(value) {
@@ -522,8 +479,15 @@ app.post('/booking', ensureDbConnected, async (req, res) => {
             }));
         }
 
+        if (mailJobs.length) {
+            const results = await Promise.allSettled(mailJobs);
+            const okCount = results.filter((result) => result.status === 'fulfilled' && result.value === true).length;
+            console.log(`Booking mail status: ${okCount}/${mailJobs.length} sends successful.`);
+        } else {
+            console.warn('Booking mail skipped: no recipient email available.');
+        }
+
         res.redirect('/home');
-        runMailJobsInBackground(mailJobs, 'Booking');
     }).catch((err) => {
         console.log(err);
     })
@@ -672,8 +636,13 @@ app.post('/payment/verify', check2, async (req, res) => {
         }));
     }
 
+    if (mailJobs.length) {
+        const results = await Promise.allSettled(mailJobs);
+        const okCount = results.filter((result) => result.status === 'fulfilled' && result.value === true).length;
+        console.log(`Checkout mail status: ${okCount}/${mailJobs.length} sends successful.`);
+    }
+
     res.json({ success: true, message: 'Payment verified successfully.' });
-    runMailJobsInBackground(mailJobs, 'Checkout');
 });
 
 // admin delete
