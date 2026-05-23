@@ -32,7 +32,8 @@ const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
 const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
 const SMTP_SECURE = String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true';
 const SMTP_USER = process.env.SMTP_USER || 'sumanpingla20@gmail.com';
-const SMTP_PASS = process.env.SMTP_PASS ;
+const SMTP_PASS_RAW = String(process.env.SMTP_PASS || process.env.SMTP_APP_PASSWORD || '').trim();
+const SMTP_PASS = SMTP_HOST.includes('gmail.com') ? SMTP_PASS_RAW.replace(/\s+/g, '') : SMTP_PASS_RAW;
 const MAIL_FROM = process.env.MAIL_FROM || 'support@kuchbhi.com';
 const ADMIN_NOTIFICATION_EMAIL = process.env.ADMIN_NOTIFICATION_EMAIL || 'sumanpingla20@gmail.com';
 const EFFECTIVE_MAIL_FROM = SMTP_USER ? `KuchBhi Support <${SMTP_USER}>` : (MAIL_FROM || 'no-reply@kuchbhi.com');
@@ -79,7 +80,10 @@ if (mailTransporter) {
             console.error('SMTP verification failed:', err.message || err);
         });
 } else {
-    console.warn('SMTP is not configured. Email notifications are disabled.');
+    const missingVars = [];
+    if (!SMTP_USER) missingVars.push('SMTP_USER');
+    if (!SMTP_PASS) missingVars.push('SMTP_PASS or SMTP_APP_PASSWORD');
+    console.warn(`SMTP is not configured. Email notifications are disabled. Missing: ${missingVars.join(', ') || 'unknown'}`);
 }
 
 async function sendMailSafe(mailOptions) {
