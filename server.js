@@ -43,6 +43,7 @@ const SMTP_SOCKET_TIMEOUT = Number(process.env.SMTP_SOCKET_TIMEOUT || 20000);
 const SMTP_VERIFY_ON_START = String(process.env.SMTP_VERIFY_ON_START || 'false').toLowerCase() === 'true';
 const SMTP_IP_FAMILY = Number(process.env.SMTP_IP_FAMILY || 4);
 const DNS_RESULT_ORDER = process.env.DNS_RESULT_ORDER || 'ipv4first';
+const BREVO_API_KEY = String(process.env.BREVO_API_KEY || '').trim();
 const MAIL_FROM = process.env.MAIL_FROM || 'support@kuchbhi.com';
 const ADMIN_NOTIFICATION_EMAIL = process.env.ADMIN_NOTIFICATION_EMAIL || 'sumanpingla20@gmail.com';
 const EFFECTIVE_MAIL_FROM = SMTP_USER ? `KuchBhi Support <${SMTP_USER}>` : (MAIL_FROM || 'no-reply@kuchbhi.com');
@@ -113,10 +114,14 @@ if (mailTransporter && SMTP_VERIFY_ON_START) {
 // --- Brevo (Sendinblue) transactional email ---
 const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || 'sumanpingla20@gmail.com';
 const BREVO_SENDER_NAME  = process.env.BREVO_SENDER_NAME  || 'KuchBhi Restaurant';
-const USE_BREVO = Boolean(process.env.BREVO_API_KEY);
+const USE_BREVO = BREVO_API_KEY.startsWith('xkeysib-');
 const brevoClient = USE_BREVO
-    ? new brevo.BrevoClient({ apiKey: process.env.BREVO_API_KEY })
+    ? new brevo.BrevoClient({ apiKey: BREVO_API_KEY })
     : null;
+
+if (BREVO_API_KEY && !USE_BREVO) {
+    console.warn('BREVO_API_KEY is present but does not look like a Brevo API key (expected prefix: xkeysib-). Falling back to SMTP.');
+}
 
 async function sendMailSafe(mailOptions) {
     // --- Brevo path ---
@@ -134,8 +139,7 @@ async function sendMailSafe(mailOptions) {
             console.log(`[Brevo] Email sent to ${mailOptions.to}:`, result?.body?.messageId || result);
             return true;
         } catch (err) {
-            console.error('[Brevo] Email send failed:', err?.response?.body || err.message || err);
-            return false;
+            console.error('[Brevo] Email send failed. Falling back to SMTP:', err?.response?.body || err.message || err);
         }
     }
 
