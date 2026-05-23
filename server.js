@@ -40,6 +40,7 @@ const MAIL_HEADER_LOGO_URL = 'https://crm.onetechsoftware.com/img/logo2.png';
 const MAIL_SUPPORT_NAME = process.env.MAIL_SUPPORT_NAME || 'Soumyajit Bhattyachrya';
 const MAIL_SUPPORT_EMAIL = SMTP_USER || 'support@kuchbhi.com';
 const MAIL_SUPPORT_PHONE = process.env.MAIL_SUPPORT_PHONE || '+91 6289 279 707';
+const APP_BASE_URL = (process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 3000}`).replace(/\/+$/, '');
 const MAIL_TEMPLATE_PATH = path.join(__dirname, 'templates', 'kuchbhi-mail.html');
 const MAIL_LOGO_PATH = process.env.MAIL_LOGO_PATH || path.join(__dirname, 'img', 'hero.png');
 const MAIL_LOGO_CID = 'kuchbhi-logo@kuchbhi';
@@ -48,6 +49,11 @@ const MAIL_LOGO_SRC = MAIL_LOGO_EXISTS ? `cid:${MAIL_LOGO_CID}` : MAIL_HEADER_LO
 const MAIL_LOGO_ATTACHMENTS = MAIL_LOGO_EXISTS
     ? [{ filename: path.basename(MAIL_LOGO_PATH), path: MAIL_LOGO_PATH, cid: MAIL_LOGO_CID }]
     : [];
+
+function buildAppUrl(routePath = '/') {
+    const safePath = routePath.startsWith('/') ? routePath : `/${routePath}`;
+    return `${APP_BASE_URL}${safePath}`;
+}
 
 console.log(`Effective mail sender: ${EFFECTIVE_MAIL_FROM}`);
 
@@ -439,7 +445,7 @@ app.post('/booking', ensureDbConnected, async (req, res) => {
                         { label: 'Number of People', value: bokingInfo.people || 'Not provided' },
                         { label: 'Special Request', value: bokingInfo.req || 'None' }
                     ],
-                    actionUrl: 'http://localhost:3000/menu',
+                    actionUrl: buildAppUrl('/menu'),
                     actionText: 'Explore Menu',
                     footer: 'Thank you for booking with KuchBhi.'
                 })
@@ -593,7 +599,7 @@ app.post('/payment/verify', check2, async (req, res) => {
                     { label: 'Amount Paid', value: `Rs.${safeAmount.toFixed(2)}` },
                     { label: 'Items', value: orderSummary }
                 ],
-                    actionUrl: 'http://localhost:3000/home',
+                    actionUrl: buildAppUrl('/home'),
                     actionText: 'Go to KuchBhi',
                 footer: 'Thank you for ordering from KuchBhi.'
             })
