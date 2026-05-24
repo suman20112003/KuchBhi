@@ -124,21 +124,23 @@
                         <div class="wow fadeInUp" data-wow-delay="0.2s">
                             <form action="/login" method="POST">
                                 <div class="row g-3">
+                                    <input type="hidden" name="authMode" id="loginAuthMode" value="local">
                                     <div class="col-md-6">
                                         <div class="form-floating">
-                                            <input type="email" class="form-control" id="email" name= "email"placeholder="Your Email">
+                                            <input type="email" class="form-control" id="email" name="email" placeholder="Your Email" required autocomplete="email">
                                             <label for="email">Your Email</label>
                                         </div>
                                     </div>
                                     <div class="col-md-6">
                                         <div class="form-floating">
-                                            <input type="password" class="form-control" id="password" name="password" placeholder="Your Password">
+                                            <input type="password" class="form-control" id="password" name="password" placeholder="Your Password" required autocomplete="current-password">
                                             <label for="name">Your Password</label>
                                         </div>
                                     </div>
                                     
-                                    <div class="col-12">
-                                        <input class="btn btn-primary w-100 py-3" type="submit" value="Submit">
+                                    <div class="col-12 d-grid gap-2">
+                                        <button class="btn btn-primary py-3" type="submit" onclick="document.getElementById('loginAuthMode').value='local'">Login</button>
+                                        <button class="btn btn-light border py-3" type="button" onclick="continueWithGoogle()"><i class="fab fa-google me-2"></i>Continue With Google</button>
                                     </div>
                                 </div>
                             </form>
@@ -227,17 +229,77 @@
     <script src="lib/tempusdominus/js/moment.min.js"></script>
     <script src="lib/tempusdominus/js/moment-timezone.min.js"></script>
     <script src="lib/tempusdominus/js/tempusdominus-bootstrap-4.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.4/firebase-auth-compat.js"></script>
 
     <!-- Template Javascript -->
     <script src="js/main.js"></script>
     <script>
+        let firebaseAuthReadyPromise;
+
+        async function ensureFirebaseGoogleReady() {
+            if (firebaseAuthReadyPromise) {
+                return firebaseAuthReadyPromise;
+            }
+
+            firebaseAuthReadyPromise = (async () => {
+                const response = await fetch('/auth/firebase-config');
+                if (!response.ok) {
+                    throw new Error('Firebase Google login is not configured on server.');
+                }
+
+                const config = await response.json();
+                if (!firebase.apps.length) {
+                    firebase.initializeApp(config);
+                }
+                return firebase.auth();
+            })();
+
+            return firebaseAuthReadyPromise;
+        }
+
+        async function continueWithGoogle() {
+            try {
+                const auth = await ensureFirebaseGoogleReady();
+                const provider = new firebase.auth.GoogleAuthProvider();
+                provider.setCustomParameters({ prompt: 'select_account' });
+
+                const result = await auth.signInWithPopup(provider);
+                const idToken = await result.user.getIdToken();
+
+                const loginResponse = await fetch('/auth/firebase-google', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ idToken })
+                });
+
+                const data = await loginResponse.json().catch(() => ({}));
+                if (!loginResponse.ok || !data.success) {
+                    throw new Error(data.message || data.code || 'Google sign-in failed.');
+                }
+
+                window.location.href = data.redirect || '/home';
+            } catch (err) {
+                alert(err.message || 'Unable to continue with Google right now.');
+            }
+        }
+
         (function () {
             const params = new URLSearchParams(window.location.search);
             const error = params.get('error');
+            const code = params.get('code');
             const logout = params.get('logout');
 
             if (error === 'invalid') {
                 alert('Wrong email or password. Please try again.');
+            } else if (error === 'invalid_email') {
+                alert('Please enter a valid email address (example: name@gmail.com).');
+            } else if (error === 'firebase') {
+                alert(`Firebase authentication failed.${code ? `\nCode: ${code}` : ''}`);
+            } else if (error === 'firebase_not_configured') {
+                alert('Firebase login is not configured on server.');
+            } else if (error === 'firebase_exists') {
+                alert('This email is already registered in Firebase. Please login instead.');
             } else if (error === 'server') {
                 alert('Login failed. Please try again.');
             } else if (logout === 'success') {

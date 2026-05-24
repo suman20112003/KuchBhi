@@ -11,6 +11,7 @@ A full-stack restaurant web application built with Node.js, Express, MongoDB, an
 - Booking and cart-related frontend pages
 - Razorpay payment gateway integration
 - Email notifications via Nodemailer SMTP
+- Firebase Email/Password signup and login bridge
 - Responsive UI with Bootstrap and custom CSS
 
 ## Tech Stack
@@ -21,6 +22,7 @@ A full-stack restaurant web application built with Node.js, Express, MongoDB, an
 - Auth/session: express-session
 - Payments: Razorpay
 - Email: Nodemailer
+- Firebase Auth: Identity Toolkit (Email/Password)
 - Frontend: HTML, CSS, JavaScript, Bootstrap
 
 ## Project Structure
@@ -66,12 +68,19 @@ ADMIN_NOTIFICATION_EMAIL="admin@example.com"
 
 MONGODB_URI="mongodb+srv://username:password@cluster0.mongodb.net/DbName?retryWrites=true&w=majority&appName=Cluster0"
 MONGODB_DB="DbName"
+
+FIREBASE_API_KEY="your_firebase_web_api_key"
+FIREBASE_AUTH_DOMAIN="your-project-id.firebaseapp.com"
+FIREBASE_PROJECT_ID="your-project-id"
+FIREBASE_APP_ID="your_firebase_app_id"
 ```
 
 Notes:
 - `MONGODB_URI` must not contain `<db_password>` placeholder at runtime.
 - `MONGODB_DB` should match your target database name.
 - If your DB password has special characters (like `@`, `#`, `/`, `:`), URL-encode it.
+- To use Firebase login/signup fallback, enable **Email/Password** provider in Firebase Console Authentication settings and set `FIREBASE_API_KEY`.
+- To use Google popup login, enable **Google** provider in Firebase Authentication and add your domain (for local dev: `localhost`) in authorized domains.
 
 ## Run the Application
 

@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const dns = require('dns');
+const https = require('https');
 const { spawn } = require('child_process');
 const session = require("express-session");
 const cookie = require('cookie-parser');
@@ -52,6 +53,11 @@ const MAIL_SUPPORT_NAME = process.env.MAIL_SUPPORT_NAME || 'Soumyajit Bhattyachr
 const MAIL_SUPPORT_EMAIL = SMTP_USER || 'support@kuchbhi.com';
 const MAIL_SUPPORT_PHONE = process.env.MAIL_SUPPORT_PHONE || '+91 6289 279 707';
 const APP_BASE_URL = (process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 3000}`).replace(/\/+$/, '');
+const FIREBASE_API_KEY = String(process.env.FIREBASE_API_KEY || '').trim();
+const FIREBASE_AUTH_BASE_URL = 'https://identitytoolkit.googleapis.com/v1';
+const FIREBASE_AUTH_DOMAIN = String(process.env.FIREBASE_AUTH_DOMAIN || '').trim();
+const FIREBASE_PROJECT_ID = String(process.env.FIREBASE_PROJECT_ID || '').trim();
+const FIREBASE_APP_ID = String(process.env.FIREBASE_APP_ID || '').trim();
 const MAIL_TEMPLATE_PATH = path.join(__dirname, 'templates', 'kuchbhi-mail.html');
 const MAIL_LOGO_PATH = process.env.MAIL_LOGO_PATH || path.join(__dirname, 'img', 'hero.png');
 const MAIL_LOGO_CID = 'kuchbhi-logo@kuchbhi';
@@ -74,7 +80,129 @@ function buildAppUrl(routePath = '/') {
     return `${APP_BASE_URL}${safePath}`;
 }
 
+function hasFirebaseAuthConfig() {
+    return Boolean(FIREBASE_API_KEY);
+}
+
+function hasFirebaseWebConfig() {
+    return Boolean(FIREBASE_API_KEY && FIREBASE_AUTH_DOMAIN && FIREBASE_PROJECT_ID && FIREBASE_APP_ID);
+}
+
+function normalizeEmail(email) {
+    return String(email || '').trim().toLowerCase();
+}
+
+function isValidEmail(email) {
+    const normalized = normalizeEmail(email);
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized);
+}
+
+function isFirebaseEmailInputError(code) {
+    return code === 'INVALID_EMAIL' || code === 'MISSING_EMAIL';
+}
+
+async function firebaseAuthRequest(endpoint, payload) {
+    if (!hasFirebaseAuthConfig()) {
+        return { ok: false, code: 'FIREBASE_NOT_CONFIGURED' };
+    }
+
+    try {
+        const url = new URL(`${FIREBASE_AUTH_BASE_URL}/${endpoint}?key=${encodeURIComponent(FIREBASE_API_KEY)}`);
+        const body = JSON.stringify(payload);
+
+        const result = await new Promise((resolve, reject) => {
+            const req = https.request({
+                protocol: url.protocol,
+                hostname: url.hostname,
+                path: `${url.pathname}${url.search}`,
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(body)
+                },
+                timeout: 15000
+            }, (res) => {
+                let raw = '';
+                res.setEncoding('utf8');
+                res.on('data', (chunk) => {
+                    raw += chunk;
+                });
+                res.on('end', () => {
+                    let data = {};
+                    try {
+                        data = raw ? JSON.parse(raw) : {};
+                    } catch (parseErr) {
+                        return resolve({ ok: false, code: 'FIREBASE_BAD_JSON_RESPONSE' });
+                    }
+
+                    if (res.statusCode >= 200 && res.statusCode < 300) {
+                        return resolve({ ok: true, data });
+                    }
+
+                    const message = data && data.error && data.error.message ? data.error.message : `FIREBASE_HTTP_${res.statusCode}`;
+                    return resolve({ ok: false, code: message });
+                });
+            });
+
+            req.on('timeout', () => {
+                req.destroy(new Error('FIREBASE_TIMEOUT'));
+            });
+
+            req.on('error', (err) => {
+                reject(err);
+            });
+
+            req.write(body);
+            req.end();
+        });
+
+        return result;
+    } catch (err) {
+        return { ok: false, code: err.message || 'FIREBASE_REQUEST_FAILED' };
+    }
+}
+
+async function firebaseSignUpWithEmailPassword({ email, password, name }) {
+    const result = await firebaseAuthRequest('accounts:signUp', {
+        email,
+        password,
+        returnSecureToken: true
+    });
+
+    if (!result.ok) {
+        return result;
+    }
+
+    if (name && result.data && result.data.idToken) {
+        // Best effort: set Firebase display name after account creation.
+        await firebaseAuthRequest('accounts:update', {
+            idToken: result.data.idToken,
+            displayName: name,
+            returnSecureToken: false
+        });
+    }
+
+    return result;
+}
+
+async function firebaseSignInWithEmailPassword({ email, password }) {
+    return firebaseAuthRequest('accounts:signInWithPassword', {
+        email,
+        password,
+        returnSecureToken: true
+    });
+}
+
+async function firebaseLookupByIdToken(idToken) {
+    return firebaseAuthRequest('accounts:lookup', { idToken });
+}
+
 console.log(`Effective mail sender: ${EFFECTIVE_MAIL_FROM}`);
+if (hasFirebaseAuthConfig()) {
+    console.log('Firebase Email/Password auth bridge enabled.');
+} else {
+    console.warn('Firebase auth bridge disabled. Set FIREBASE_API_KEY to enable Firebase login/signup fallback.');
+}
 
 if (typeof dns.setDefaultResultOrder === 'function') {
     try {
@@ -397,6 +525,85 @@ app.get('/home', (req, res) => {
 app.get('/menu', (req, res) => {
     res.sendFile(__dirname + "/menu.html")
 })
+
+app.get('/auth/firebase-config', (req, res) => {
+    if (!hasFirebaseWebConfig()) {
+        return res.status(503).json({ message: 'Firebase web config is missing on server.' });
+    }
+
+    res.json({
+        apiKey: FIREBASE_API_KEY,
+        authDomain: FIREBASE_AUTH_DOMAIN,
+        projectId: FIREBASE_PROJECT_ID,
+        appId: FIREBASE_APP_ID
+    });
+});
+
+app.post('/auth/firebase-google', ensureDbConnected, async (req, res) => {
+    try {
+        if (!hasFirebaseAuthConfig()) {
+            return res.status(503).json({ success: false, message: 'Firebase auth is not configured.' });
+        }
+
+        const idToken = String(req.body.idToken || '').trim();
+        if (!idToken) {
+            return res.status(400).json({ success: false, message: 'Missing Google ID token.' });
+        }
+
+        const lookupResult = await firebaseLookupByIdToken(idToken);
+        if (!lookupResult.ok) {
+            return res.status(401).json({ success: false, message: 'Invalid Firebase token.', code: lookupResult.code });
+        }
+
+        const firebaseUser = lookupResult.data && Array.isArray(lookupResult.data.users)
+            ? lookupResult.data.users[0]
+            : null;
+
+        if (!firebaseUser) {
+            return res.status(401).json({ success: false, message: 'Firebase user not found for token.' });
+        }
+
+        const email = normalizeEmail(firebaseUser.email || '');
+        if (!isValidEmail(email)) {
+            return res.status(400).json({ success: false, message: 'Google account email is missing or invalid.' });
+        }
+
+        const firebaseUid = String(firebaseUser.localId || '');
+        const fallbackName = String(firebaseUser.displayName || email.split('@')[0] || 'User').trim();
+
+        let user = await dbinstance.collection('user').findOne({ email });
+        if (!user) {
+            const newUser = {
+                name: fallbackName,
+                email,
+                password: '__firebase_google__',
+                role: 'user',
+                firebaseUid,
+                authProvider: 'google'
+            };
+            const insertResult = await dbinstance.collection('user').insertOne(newUser);
+            user = { ...newUser, _id: insertResult.insertedId };
+        } else {
+            const updates = {};
+            if (!user.firebaseUid && firebaseUid) updates.firebaseUid = firebaseUid;
+            if (!user.authProvider) updates.authProvider = 'google';
+            if (!user.name && fallbackName) updates.name = fallbackName;
+
+            if (Object.keys(updates).length) {
+                await dbinstance.collection('user').updateOne({ _id: user._id }, { $set: updates });
+                user = { ...user, ...updates };
+            }
+        }
+
+        req.session.user = user;
+        const redirect = req.session.user.role == 'admin' ? '/admin' : '/home';
+        return res.json({ success: true, redirect });
+    } catch (err) {
+        console.error('Firebase Google auth failed:', err.message || err);
+        return res.status(500).json({ success: false, message: 'Unable to complete Google sign-in.' });
+    }
+});
+
 app.get("/test-mail", async (req, res) => {
     try {
         const info = await mailTransporter.sendMail({
@@ -454,16 +661,90 @@ app.get('/cartcheck', check2, (req, res) => {
 })
 app.post('/login', ensureDbConnected, (req, res) => {
     const userData = req.body;
+    const email = normalizeEmail(userData.email);
+    const password = String(userData.password || '');
+    const authMode = String(userData.authMode || 'local').toLowerCase();
+    const preferFirebase = authMode === 'firebase';
 
-    dbinstance.collection('user').findOne({
-        email: userData.email,
-        password: userData.password
-    }).then((user) => {
-        if (!user) {
+    if (!isValidEmail(email)) {
+        return res.redirect('/login?error=invalid_email');
+    }
+
+    if (preferFirebase && !hasFirebaseAuthConfig()) {
+        return res.redirect('/login?error=firebase_not_configured');
+    }
+
+    dbinstance.collection('user').findOne({ email, password }).then(async (localUser) => {
+        if (!preferFirebase) {
+            if (!localUser) {
+                return req.session.destroy(() => {
+                    res.clearCookie('connect.sid');
+                    return res.redirect('/login?error=invalid');
+                });
+            }
+
+            req.session.user = localUser;
+            if (req.session.user.role == 'admin') {
+                return res.redirect('/admin');
+            }
+            return res.redirect('/home');
+        }
+
+        let firebaseAuthenticated = false;
+        let firebaseAuthData = null;
+        const firebaseSignInResult = await firebaseSignInWithEmailPassword({ email, password });
+        if (firebaseSignInResult.ok) {
+            firebaseAuthenticated = true;
+            firebaseAuthData = firebaseSignInResult.data || null;
+        } else if (localUser) {
+            // If user exists locally but not in Firebase yet, provision on-demand.
+            const firebaseSignUpResult = await firebaseSignUpWithEmailPassword({
+                email,
+                password,
+                name: localUser.name || ''
+            });
+
+            if (firebaseSignUpResult.ok) {
+                firebaseAuthenticated = true;
+                const createdUid = firebaseSignUpResult.data && firebaseSignUpResult.data.localId ? firebaseSignUpResult.data.localId : '';
+                if (createdUid && !localUser.firebaseUid) {
+                    await dbinstance.collection('user').updateOne({ _id: localUser._id }, { $set: { firebaseUid: createdUid } });
+                    localUser.firebaseUid = createdUid;
+                }
+            } else if (firebaseSignUpResult.code === 'EMAIL_EXISTS') {
+                const secondSignInResult = await firebaseSignInWithEmailPassword({ email, password });
+                if (secondSignInResult.ok) {
+                    firebaseAuthenticated = true;
+                    firebaseAuthData = secondSignInResult.data || null;
+                }
+            }
+        }
+
+        if (!firebaseAuthenticated) {
             return req.session.destroy(() => {
                 res.clearCookie('connect.sid');
-                return res.redirect('/login?error=invalid');
+                if (isFirebaseEmailInputError(firebaseSignInResult.code)) {
+                    return res.redirect('/login?error=invalid_email');
+                }
+                const code = encodeURIComponent(firebaseSignInResult.code || 'UNKNOWN_FIREBASE_ERROR');
+                return res.redirect(`/login?error=firebase&code=${code}`);
             });
+        }
+
+        let user = await dbinstance.collection('user').findOne({ email });
+        if (!user) {
+            const firebaseUserData = firebaseAuthData || {};
+            const firebaseUid = firebaseUserData.localId || '';
+            const fallbackName = firebaseUserData.displayName || email.split('@')[0] || 'User';
+            const newUser = {
+                name: fallbackName,
+                email,
+                password,
+                role: 'user',
+                firebaseUid
+            };
+            const insertResult = await dbinstance.collection('user').insertOne(newUser);
+            user = { ...newUser, _id: insertResult.insertedId };
         }
 
         req.session.user = user;
@@ -480,15 +761,46 @@ app.post('/login', ensureDbConnected, (req, res) => {
 
 app.post('/signup', ensureDbConnected, (req, res) => {
     const userData = req.body;
-    dbinstance.collection('user').findOne({ email: userData.email }).then((existingUser) => {
+    const email = normalizeEmail(userData.email);
+    const password = String(userData.password || '');
+    const name = String(userData.name || '').trim();
+    const authMode = String(userData.authMode || 'local').toLowerCase();
+    const preferFirebase = authMode === 'firebase';
+
+    if (!isValidEmail(email)) {
+        return res.redirect('/signup?error=invalid_email');
+    }
+
+    if (preferFirebase && !hasFirebaseAuthConfig()) {
+        return res.redirect('/signup?error=firebase_not_configured');
+    }
+
+    dbinstance.collection('user').findOne({ email }).then(async (existingUser) => {
         if (existingUser) {
             res.redirect('/login');
         } else {
+            let firebaseUid = '';
+            if (preferFirebase && hasFirebaseAuthConfig()) {
+                const firebaseSignUpResult = await firebaseSignUpWithEmailPassword({ email, password, name });
+                if (firebaseSignUpResult.ok) {
+                    firebaseUid = firebaseSignUpResult.data && firebaseSignUpResult.data.localId ? firebaseSignUpResult.data.localId : '';
+                } else if (firebaseSignUpResult.code === 'EMAIL_EXISTS') {
+                    return res.redirect('/login?error=firebase_exists');
+                } else if (isFirebaseEmailInputError(firebaseSignUpResult.code)) {
+                    return res.redirect('/signup?error=invalid_email');
+                } else {
+                    console.error('Firebase signup failed:', firebaseSignUpResult.code);
+                    const code = encodeURIComponent(firebaseSignUpResult.code || 'UNKNOWN_FIREBASE_ERROR');
+                    return res.redirect(`/signup?error=firebase&code=${code}`);
+                }
+            }
+
             const newUser = {
-                name: userData.name,
-                email: userData.email,
-                password: userData.password,
-                role: 'user'
+                name,
+                email,
+                password,
+                role: 'user',
+                firebaseUid
             };
 
             dbinstance.collection('user').insertOne(newUser).then(() => {
