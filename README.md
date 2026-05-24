@@ -131,4 +131,4 @@ For production safety:
 
 ## License
 
-This project currently does not declare a license. Add one if you plan to distribute it.
+This project currently does not declare a license.
