@@ -506,13 +506,19 @@ app.get('/signup', check, (req, res) => {
     res.sendFile(__dirname + "/signup.html")
 })
 
-app.get('/admin', auth, ensureDbConnected, (req, res) => {
-    dbinstance.collection('user').find().toArray().then((users) => {
-        dbinstance.collection('booking').find().toArray().then((bookings) => {
-            console.log(bookings);
-            res.render('admin', { users: users, bookings: bookings })
-        })
-    })
+app.get('/admin', auth, ensureDbConnected, async (req, res) => {
+    try {
+        const [users, bookings, orders] = await Promise.all([
+            dbinstance.collection('user').find().toArray(),
+            dbinstance.collection('booking').find().toArray(),
+            dbinstance.collection('order').find().toArray()
+        ]);
+
+        res.render('admin', { users, bookings, orders });
+    } catch (err) {
+        console.error('Failed to load admin dashboard:', err.message || err);
+        res.status(500).send('Failed to load admin dashboard.');
+    }
 })          
 app.get('/login', check, (req, res) => {
     res.sendFile(__dirname + "/contact.html");
@@ -645,9 +651,7 @@ app.get('/service', (req, res) => {
 app.get('/about', (req, res) => {
     res.sendFile(__dirname + "/about.html");
 })
-app.get('/team', (req, res) => {
-    res.sendFile(__dirname + "/team.html");
-})
+
 app.get('/testimonial', (req, res) => {
     res.sendFile(__dirname + "/testimonial.html");
 })
@@ -1047,33 +1051,60 @@ app.post('/payment/verify', check2, async (req, res) => {
 // admin delete
 
 // Handle DELETE requests for deleting bookings
-app.delete('/delete/booking/:id', ensureDbConnected, (req, res) => {
+app.delete('/delete/booking/:id', ensureDbConnected, async (req, res) => {
     const bookingId = req.params.id;
     console.log('Deleting booking with ID:', bookingId);
-    dbinstance.collection('booking').deleteOne({ _id: new mongodb.ObjectId(bookingId) }, (err, result) => {
-        if (err) {
-            console.error('Error deleting booking:', err);
-            res.sendStatus(500); // Internal Server Error
-            return;
+
+    try {
+        const result = await dbinstance.collection('booking').deleteOne({ _id: new mongodb.ObjectId(bookingId) });
+        if (!result.deletedCount) {
+            return res.status(404).json({ message: 'Booking not found.' });
         }
+
         console.log('Booking deleted successfully:', result);
-        res.sendStatus(200); // OK
-    });
+        return res.status(200).json({ success: true });
+    } catch (err) {
+        console.error('Error deleting booking:', err);
+        return res.sendStatus(500); // Internal Server Error
+    }
 });
 
 // Handle DELETE requests for deleting users
-app.delete('/delete/user/:id', ensureDbConnected, (req, res) => {
+app.delete('/delete/user/:id', ensureDbConnected, async (req, res) => {
     const userId = req.params.id;
     console.log('Deleting user with ID:', userId);
-    dbinstance.collection('user').deleteOne({ _id: new mongodb.ObjectId(userId) }, (err, result) => {
-        if (err) {
-            console.error('Error deleting user:', err);
-            res.sendStatus(500); // Internal Server Error
-            return;
+
+    try {
+        const result = await dbinstance.collection('user').deleteOne({ _id: new mongodb.ObjectId(userId) });
+        if (!result.deletedCount) {
+            return res.status(404).json({ message: 'User not found.' });
         }
+
         console.log('User deleted successfully:', result);
-        res.sendStatus(200); // OK
-    });
+        return res.status(200).json({ success: true });
+    } catch (err) {
+        console.error('Error deleting user:', err);
+        return res.sendStatus(500); // Internal Server Error
+    }
+});
+
+// Handle DELETE requests for deleting orders
+app.delete('/delete/order/:id', ensureDbConnected, async (req, res) => {
+    const orderId = req.params.id;
+    console.log('Deleting order with ID:', orderId);
+
+    try {
+        const result = await dbinstance.collection('order').deleteOne({ _id: new mongodb.ObjectId(orderId) });
+        if (!result.deletedCount) {
+            return res.status(404).json({ message: 'Order not found.' });
+        }
+
+        console.log('Order deleted successfully:', result);
+        return res.status(200).json({ success: true });
+    } catch (err) {
+        console.error('Error deleting order:', err);
+        return res.sendStatus(500); // Internal Server Error
+    }
 });
 
 
